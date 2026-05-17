@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -32,8 +32,14 @@ function InboxChip({ item, isSelected, onSelect, onDelete }) {
   );
 }
 
-export function InboxPanel({ inbox, onAdd, onDelete, selectedId, onSelect, addInputRef, isOpen, onToggle }) {
+export function InboxPanel({
+  inbox, onAdd, onDelete, selectedId, onSelect, addInputRef, isOpen, onToggle,
+  quadrants, onAddTask,
+}) {
   const [inputVal, setInputVal] = useState('');
+  const [addingTo, setAddingTo] = useState(null);
+  const [newTitle, setNewTitle] = useState('');
+  const quickAddRef = useRef(null);
 
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -58,6 +64,23 @@ export function InboxPanel({ inbox, onAdd, onDelete, selectedId, onSelect, addIn
     }
   }
 
+  function submitNew(e) {
+    e.preventDefault();
+    if (newTitle.trim()) {
+      onAddTask({ title: newTitle.trim(), quadrant: addingTo });
+      setNewTitle('');
+      quickAddRef.current?.focus();
+    }
+  }
+
+  function openQuickAdd(qid) {
+    setAddingTo(qid === addingTo ? null : qid);
+    setNewTitle('');
+    if (qid !== addingTo) {
+      setTimeout(() => quickAddRef.current?.focus(), 50);
+    }
+  }
+
   return (
     <div className={`inbox-panel ${isOpen ? 'open' : ''}`}>
       <div className="inbox-header" onClick={onToggle}>
@@ -65,14 +88,27 @@ export function InboxPanel({ inbox, onAdd, onDelete, selectedId, onSelect, addIn
           Inbox
           {inbox.length > 0 && <span className="inbox-count">{inbox.length}</span>}
         </span>
-        <span className="inbox-header-hint">
-          {selectedId
-            ? <>Press <kbd>1</kbd>–<kbd>4</kbd> to assign · <kbd>Del</kbd> to remove · <kbd>Esc</kbd> to deselect</>
-            : isOpen
-            ? <>Drag to a quadrant · click to select · <kbd>N</kbd> to add</>
-            : null
-          }
-        </span>
+
+        {selectedId ? (
+          <span className="inbox-header-hint">
+            Press <kbd>1</kbd>–<kbd>4</kbd> to assign · <kbd>Del</kbd> to remove · <kbd>Esc</kbd> to deselect
+          </span>
+        ) : (
+          <div className="inbox-header-actions" onClick={e => e.stopPropagation()}>
+            {quadrants.map(q => (
+              <button
+                key={q.id}
+                className={`inbox-add-quadrant-btn ${addingTo === q.id ? 'active' : ''}`}
+                style={{ '--q-color': q.color }}
+                onClick={() => openQuickAdd(q.id)}
+                title={`Add directly to ${q.label}`}
+              >
+                + {q.id === 'ni' ? 'Schedule' : q.sub}
+              </button>
+            ))}
+          </div>
+        )}
+
         <button className="inbox-toggle" onClick={e => { e.stopPropagation(); onToggle(); }}>
           {isOpen ? '▼' : '▲'}
         </button>
@@ -80,9 +116,29 @@ export function InboxPanel({ inbox, onAdd, onDelete, selectedId, onSelect, addIn
 
       {isOpen && (
         <div className="inbox-body">
+          {addingTo && (
+            <form className="inbox-quick-add" onSubmit={submitNew}>
+              <span className="inbox-quick-add-label">
+                Adding to: <strong>{quadrants.find(q => q.id === addingTo)?.label}</strong>
+              </span>
+              <input
+                ref={quickAddRef}
+                className="quick-add-input"
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                placeholder="Task title… (Enter to save, Esc to cancel)"
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { setAddingTo(null); setNewTitle(''); }
+                }}
+              />
+              <button type="submit" className="btn-primary small">Add</button>
+              <button type="button" className="btn-ghost small" onClick={() => { setAddingTo(null); setNewTitle(''); }}>Cancel</button>
+            </form>
+          )}
+
           <SortableContext items={inbox.map(i => i.id)} strategy={horizontalListSortingStrategy}>
             <div className="inbox-chips">
-              {inbox.length === 0 && (
+              {inbox.length === 0 && !addingTo && (
                 <span className="inbox-empty">Brain dump here — type below to add tasks</span>
               )}
               {inbox.map(item => (

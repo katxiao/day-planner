@@ -31,13 +31,12 @@ function shiftQuarter(str, delta) {
 const CARD_COLORS = FOCUS_COLORS;
 
 // ---- Focus card ----
-function FocusCard({ focus, color, onUpdate, onDelete, onAddHabit, onRemoveHabit, onUpdateHabitDays, onAddTask, onRemoveTask, onSendToMatrix }) {
+function FocusCard({ focus, color, tasks, onUpdate, onDelete, onAddHabit, onRemoveHabit, onUpdateHabitDays, onAddTask, onRemoveTask }) {
   const [habitInput, setHabitInput] = useState('');
   const [taskInput, setTaskInput] = useState('');
 
   function handleAddTask(title) {
     onAddTask(title);
-    onSendToMatrix(title, focus.id);
   }
 
   return (
@@ -134,13 +133,19 @@ function FocusCard({ focus, color, onUpdate, onDelete, onAddHabit, onRemoveHabit
       <div className="focus-section">
         <div className="focus-section-label">Setup tasks</div>
         <div className="focus-list">
-          {focus.setupTasks.map(t => (
-            <div key={t.id} className="focus-list-item">
-              <span className="focus-list-dot" />
-              <span className="focus-list-text">{t.title}</span>
-              <button className="icon-btn danger" onClick={() => onRemoveTask(t.id)} title="Remove task">×</button>
-            </div>
-          ))}
+          {focus.setupTasks.map(t => {
+            const done = (
+              tasks?.find(tk => tk.id === t.id) ??
+              tasks?.find(tk => tk.focusId === focus.id && tk.title === t.title)
+            )?.done ?? false;
+            return (
+              <div key={t.id} className={`focus-list-item ${done ? 'focus-list-item-done' : ''}`}>
+                <span className={`focus-list-dot ${done ? 'focus-list-dot-done' : ''}`} />
+                <span className="focus-list-text">{t.title}</span>
+                <button className="icon-btn danger" onClick={() => onRemoveTask(t.id)} title="Remove task">×</button>
+              </div>
+            );
+          })}
         </div>
         <input
           className="focus-add-input"
@@ -261,10 +266,9 @@ function IdeasBank({ ideas, onAdd, onUpdate, onDelete, onPromote, quarter, quart
 
 // ---- Main component ----
 export function Focuses({
-  focuses, addFocus, updateFocus, deleteFocus,
+  tasks, focuses, addFocus, updateFocus, deleteFocus,
   addHabitToFocus, removeHabitFromFocus, updateHabitDays,
   addSetupTaskToFocus, removeSetupTaskFromFocus,
-  addToInbox,
   focusIdeas, addFocusIdea, updateFocusIdea, deleteFocusIdea, promoteFocusIdea,
 }) {
   const [quarter, setQuarter] = useState(currentQuarter);
@@ -292,6 +296,7 @@ export function Focuses({
             key={focus.id}
             focus={focus}
             color={focus.color || CARD_COLORS[idx % CARD_COLORS.length]}
+            tasks={tasks}
             onUpdate={patch => updateFocus(focus.id, patch)}
             onDelete={() => deleteFocus(focus.id)}
             onAddHabit={title => addHabitToFocus(focus.id, title)}
@@ -299,7 +304,6 @@ export function Focuses({
             onUpdateHabitDays={(habitId, days) => updateHabitDays(focus.id, habitId, days)}
             onAddTask={title => addSetupTaskToFocus(focus.id, title)}
             onRemoveTask={id => removeSetupTaskFromFocus(focus.id, id)}
-            onSendToMatrix={addToInbox}
           />
         ))}
 

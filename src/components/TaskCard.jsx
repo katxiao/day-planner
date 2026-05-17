@@ -2,7 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-export function TaskCard({ task, onUpdate, onDelete, onAddToQueue, inQueue, focuses }) {
+function formatScheduledDate(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  const diffDays = Math.round((d - new Date()) / 86400000);
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays < 7) return d.toLocaleDateString('en-US', { weekday: 'short' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export function TaskCard({ task, onUpdate, onDelete, onAddToQueue, onUnschedule, inQueue, scheduledDate, focuses }) {
   const [expanded, setExpanded] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleVal, setTitleVal] = useState(task.title);
@@ -64,13 +72,23 @@ export function TaskCard({ task, onUpdate, onDelete, onAddToQueue, inQueue, focu
           </span>
         )}
         <div className="task-actions">
-          <button
-            className={`icon-btn queue-btn ${inQueue ? 'in-queue' : ''}`}
-            title={inQueue ? "Already in today's planner" : "Add to today's planner"}
-            onClick={() => onAddToQueue(task.id)}
-          >
-            {inQueue ? '✓ Today' : '→ Today'}
-          </button>
+          {!task.done && (inQueue || scheduledDate ? (
+            <button
+              className="icon-btn queue-btn in-queue"
+              title="Click to unschedule"
+              onClick={() => onUnschedule(task.id)}
+            >
+              {inQueue ? '✓ Today' : `✓ ${formatScheduledDate(scheduledDate)}`}
+            </button>
+          ) : (
+            <button
+              className="icon-btn queue-btn"
+              title="Add to today's planner"
+              onClick={() => onAddToQueue(task.id)}
+            >
+              → Today
+            </button>
+          ))}
           <button className="icon-btn" title="Toggle notes" onClick={() => setExpanded(e => !e)}>
             {expanded ? '▲' : '▼'}
           </button>

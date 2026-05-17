@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { localDateStr } from '../store';
 import {
   DndContext, PointerSensor, useSensor, useSensors,
   DragOverlay, closestCenter,
@@ -18,55 +19,81 @@ const QUADRANTS = [
 // keyboard key → quadrant id
 const KEY_TO_QUADRANT = { '1': 'ui', '2': 'ni', '3': 'un', '4': 'nn' };
 
-function Quadrant({ quadrant, tasks, onUpdate, onDelete, onAddToQueue, queueIds, focuses }) {
+function formatScheduledDate(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  const diffDays = Math.round((d - new Date()) / 86400000);
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays < 7) return d.toLocaleDateString('en-US', { weekday: 'short' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function Quadrant({ quadrant, tasks, today, onUpdate, onDelete, onAddToQueue, onUnschedule, focuses, isCollapsed, onToggle }) {
   const { setNodeRef, isOver } = useDroppable({ id: quadrant.id });
+  const sortedTasks = [...tasks].sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
 
   return (
     <div
       ref={setNodeRef}
-      className={`quadrant ${isOver ? 'quadrant-over' : ''} ${quadrant.focus ? 'quadrant-focus' : ''}`}
+      className={`quadrant ${isOver ? 'quadrant-over' : ''} ${quadrant.focus ? 'quadrant-focus' : ''} ${isCollapsed ? 'quadrant-collapsed' : ''}`}
       style={{ '--q-color': quadrant.color }}
     >
       <div className="quadrant-header">
         <span className="quadrant-label">{quadrant.label}</span>
         <span className="quadrant-sub">{quadrant.sub}</span>
+        {isCollapsed && tasks.length > 0 && (
+          <span className="quadrant-count">{tasks.length}</span>
+        )}
+        <button
+          className="quadrant-toggle"
+          onClick={onToggle}
+          title={isCollapsed ? 'Expand' : 'Collapse'}
+        >
+          {isCollapsed ? '▸' : '▾'}
+        </button>
       </div>
-      <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-        <div className="quadrant-tasks">
-          {tasks.map(task => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-              onAddToQueue={onAddToQueue}
-              inQueue={queueIds.includes(task.id)}
-              focuses={focuses}
-            />
-          ))}
-        </div>
-      </SortableContext>
+      {!isCollapsed && (
+        <SortableContext items={sortedTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+          <div className="quadrant-tasks">
+            {sortedTasks.map(task => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+                onAddToQueue={onAddToQueue}
+                onUnschedule={onUnschedule}
+                inQueue={task.scheduledDate === today}
+                scheduledDate={task.scheduledDate && task.scheduledDate !== today ? task.scheduledDate : null}
+                focuses={focuses}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      )}
     </div>
   );
 }
 
 export function Matrix({
-  tasks, onUpdate, onDelete, onAddTask, onAddToQueue, dayQueue, reorderTasks, moveTask,
+  tasks, onUpdate, onDelete, onAddTask, onAddToQueue, onUnschedule, reorderTasks, moveTask,
   inbox, onAddToInbox, onDeleteFromInbox, onMoveFromInboxToQuadrant, onReorderInbox,
   focuses,
 }) {
-  const [addingTo, setAddingTo] = useState(null);
-  const [newTitle, setNewTitle] = useState('');
+  const today = localDateStr();
   const [activeId, setActiveId] = useState(null);
   const [activeType, setActiveType] = useState(null); // 'task' | 'inbox'
   const [selectedInboxId, setSelectedInboxId] = useState(null);
   const [inboxOpen, setInboxOpen] = useState(true);
-  const addInputRef = useRef(null);
-  const quickAddRef = useRef(null);
+  const [collapsedQuadrants, setCollapsedQuadrants] = useState(() => new Set(['un', 'nn']));
 
-  useEffect(() => {
-    if (addingTo) quickAddRef.current?.focus();
-  }, [addingTo]);
+  function toggleQuadrant(id) {
+    setCollapsedQuadrants(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  const addInputRef = useRef(null);
 
   useEffect(() => {
     function onKey(e) {
@@ -90,7 +117,6 @@ export function Matrix({
       if (selectedInboxId) {
         if (KEY_TO_QUADRANT[e.key]) {
           const currentIdx = inbox.findIndex(i => i.id === selectedInboxId);
-          // pick next item before removing current one
           const nextItem = inbox[currentIdx + 1] ?? inbox[currentIdx - 1] ?? null;
           onMoveFromInboxToQuadrant(selectedInboxId, KEY_TO_QUADRANT[e.key]);
           setSelectedInboxId(nextItem?.id ?? null);
@@ -115,23 +141,12 @@ export function Matrix({
         return;
       }
       if (e.key === 'Escape') {
-        setAddingTo(null);
-        setNewTitle('');
         setSelectedInboxId(null);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedInboxId, inboxOpen, inbox, onMoveFromInboxToQuadrant, onDeleteFromInbox]);
-
-  function submitNew(e) {
-    e.preventDefault();
-    if (newTitle.trim()) {
-      onAddTask({ title: newTitle.trim(), quadrant: addingTo });
-      setNewTitle('');
-      quickAddRef.current?.focus();
-    }
-  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -151,7 +166,6 @@ export function Matrix({
     const dragType = active.data.current?.type ?? 'task';
 
     if (dragType === 'inbox') {
-      // Inbox item dropped onto a quadrant zone or a task inside a quadrant
       const targetQuadrant = QUADRANTS.find(q => q.id === over.id);
       if (targetQuadrant) {
         onMoveFromInboxToQuadrant(active.id, targetQuadrant.id);
@@ -162,7 +176,6 @@ export function Matrix({
         onMoveFromInboxToQuadrant(active.id, toTask.quadrant);
         return;
       }
-      // Reorder within inbox
       const oldIdx = inbox.findIndex(i => i.id === active.id);
       const newIdx = inbox.findIndex(i => i.id === over.id);
       if (oldIdx !== -1 && newIdx !== -1) {
@@ -171,7 +184,6 @@ export function Matrix({
       return;
     }
 
-    // Existing task drag
     const fromTask = tasks.find(t => t.id === active.id);
     if (!fromTask) return;
 
@@ -197,63 +209,12 @@ export function Matrix({
 
   return (
     <div className="matrix-view">
-      <div className="matrix-toolbar">
-        <div className="matrix-toolbar-hints">
-          <span className="matrix-toolbar-hint">
-            <kbd>N</kbd> to add to inbox · drag inbox items to a quadrant · click item then <kbd>1</kbd>–<kbd>4</kbd> to categorize
-          </span>
-        </div>
-        {QUADRANTS.map(q => (
-          <button
-            key={q.id}
-            className="add-btn"
-            style={{ '--q-color': q.color }}
-            onClick={() => setAddingTo(q.id === addingTo ? null : q.id)}
-          >
-            + {q.id === 'ni' ? 'Schedule' : q.sub}
-          </button>
-        ))}
-      </div>
-
-      {addingTo && (
-        <form className="quick-add" onSubmit={submitNew}>
-          <span className="quick-add-label">
-            Adding to: <strong>{QUADRANTS.find(q => q.id === addingTo)?.label}</strong>
-          </span>
-          <input
-            ref={quickAddRef}
-            className="quick-add-input"
-            value={newTitle}
-            onChange={e => setNewTitle(e.target.value)}
-            placeholder="Task title… (Enter to save, Esc to cancel)"
-            onKeyDown={e => { if (e.key === 'Escape') { setAddingTo(null); setNewTitle(''); } }}
-          />
-          <button type="submit" className="btn-primary">Add</button>
-          <button type="button" className="btn-ghost" onClick={() => { setAddingTo(null); setNewTitle(''); }}>Cancel</button>
-        </form>
-      )}
-
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="matrix-grid">
-          {QUADRANTS.map(q => (
-            <Quadrant
-              key={q.id}
-              quadrant={q}
-              tasks={tasks.filter(t => t.quadrant === q.id)}
-              onUpdate={onUpdate}
-              onDelete={onDelete}
-              onAddToQueue={onAddToQueue}
-              queueIds={dayQueue}
-              focuses={focuses}
-            />
-          ))}
-        </div>
-
         <InboxPanel
           inbox={inbox}
           onAdd={onAddToInbox}
@@ -263,7 +224,27 @@ export function Matrix({
           addInputRef={addInputRef}
           isOpen={inboxOpen}
           onToggle={() => setInboxOpen(o => !o)}
+          quadrants={QUADRANTS}
+          onAddTask={onAddTask}
         />
+
+        <div className="matrix-grid">
+          {QUADRANTS.map(q => (
+            <Quadrant
+              key={q.id}
+              quadrant={q}
+              tasks={tasks.filter(t => t.quadrant === q.id && (!t.done || (t.completedAt && localDateStr(new Date(t.completedAt)) === today)))}
+              today={today}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              onAddToQueue={onAddToQueue}
+              onUnschedule={onUnschedule}
+              focuses={focuses}
+              isCollapsed={collapsedQuadrants.has(q.id)}
+              onToggle={() => toggleQuadrant(q.id)}
+            />
+          ))}
+        </div>
 
         <DragOverlay>
           {activeType === 'inbox' && activeInboxItem ? (

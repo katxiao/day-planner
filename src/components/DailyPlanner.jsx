@@ -481,7 +481,7 @@ function dateToQuarter(dateStr) {
 
 export function DailyPlanner({
   blocksForDate, addBlock, updateBlock, deleteBlock,
-  tasks, getQueueForDate, addToDateQueue, removeFromDateQueue, reorderDateQueue, onUpdateTask,
+  tasks, getTasksForDate, scheduleTask, unscheduleTask, reorderDayOrder, onUpdateTask,
   focuses, habitLogs, onToggleHabit,
 }) {
   const [editingBlock, setEditingBlock] = useState(null);
@@ -493,14 +493,13 @@ export function DailyPlanner({
   const todayStr = localDateStr();
   const isToday = selectedDate === todayStr;
   const dateBlocks = blocksForDate(selectedDate);
-  const dayQueue = getQueueForDate(selectedDate);
-
-  const queuedTasks = dayQueue.map(id => tasks.find(t => t.id === id)).filter(Boolean);
+  const queuedTasks = getTasksForDate(selectedDate)
+    .sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
   const scheduledTaskIds = new Set(dateBlocks.filter(b => b.taskId).map(b => b.taskId));
   const activeQueueTask = activeDragTaskId ? tasks.find(t => t.id === activeDragTaskId) ?? null : null;
 
-  // Tasks available to pull in: undone, not already in this day's queue
-  const availableTasks = tasks.filter(t => !t.done && !dayQueue.includes(t.id));
+  // Tasks available to pull in: undone and not scheduled on any day
+  const availableTasks = tasks.filter(t => !t.done && !t.scheduledDate);
 
   // Focus priorities for the selected date's quarter
   const plannerQuarter = dateToQuarter(selectedDate);
@@ -545,9 +544,10 @@ export function DailyPlanner({
     }
 
     if (active.id !== over.id) {
-      const oldIdx = dayQueue.indexOf(active.id);
-      const newIdx = dayQueue.indexOf(over.id);
-      if (oldIdx !== -1 && newIdx !== -1) reorderDateQueue(selectedDate, arrayMove(dayQueue, oldIdx, newIdx));
+      const ids = queuedTasks.map(t => t.id);
+      const oldIdx = ids.indexOf(active.id);
+      const newIdx = ids.indexOf(over.id);
+      if (oldIdx !== -1 && newIdx !== -1) reorderDayOrder(selectedDate, arrayMove(ids, oldIdx, newIdx));
     }
   }
 
@@ -597,7 +597,7 @@ export function DailyPlanner({
               <h2>{isToday ? "Today's Tasks" : "Tasks for this day"}</h2>
             </div>
 
-            <SortableContext items={dayQueue} strategy={verticalListSortingStrategy}>
+            <SortableContext items={queuedTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
               <div className="queue-list">
                 {queuedTasks.length === 0
                   ? <p className="empty-state">No tasks yet — pull some in below.</p>
@@ -606,7 +606,7 @@ export function DailyPlanner({
                       key={task.id}
                       task={task}
                       isScheduled={scheduledTaskIds.has(task.id)}
-                      onRemove={id => removeFromDateQueue(id, selectedDate)}
+                      onRemove={unscheduleTask}
                       onUpdate={onUpdateTask}
                     />
                   ))
@@ -619,7 +619,7 @@ export function DailyPlanner({
           <section className="planner-section focus-priorities-panel">
             <div className="pull-panel">
               {availableTasks.length === 0 ? (
-                <p className="empty-state">All undone tasks are already added.</p>
+                <p className="empty-state">All tasks are scheduled.</p>
               ) : (
                 <>
                   {/* Focus priorities first */}
@@ -634,7 +634,7 @@ export function DailyPlanner({
                           {fTasks.map(task => (
                             <div key={task.id} className="pull-item pull-item-focus" style={{ '--focus-color': focus.color }}>
                               <span className="pull-item-title">{task.title}</span>
-                              <button className="pull-item-add" onClick={() => addToDateQueue(task.id, selectedDate)}>+</button>
+                              <button className="pull-item-add" onClick={() => scheduleTask(task.id, selectedDate)}>+</button>
                             </div>
                           ))}
                         </div>
@@ -657,7 +657,7 @@ export function DailyPlanner({
                             {qTasks.map(task => (
                               <div key={task.id} className="pull-item">
                                 <span className="pull-item-title">{task.title}</span>
-                                <button className="pull-item-add" onClick={() => addToDateQueue(task.id, selectedDate)}>+</button>
+                                <button className="pull-item-add" onClick={() => scheduleTask(task.id, selectedDate)}>+</button>
                               </div>
                             ))}
                           </div>

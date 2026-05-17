@@ -6,10 +6,10 @@ const defaultState = {
   tasks: [],
   inbox: [],
   blocks: [],
-  dayQueues: {},   // { 'YYYY-MM-DD': ['taskId', ...] }
-  focuses: [],     // quarterly focus themes
-  focusIdeas: [],  // unscheduled future focus ideas
-  habitLogs: {},   // { 'YYYY-MM-DD': ['habitId', ...] }
+  dayOrders: {},    // { 'YYYY-MM-DD': ['taskId', ...] } — ordering only
+  focuses: [],      // quarterly focus themes
+  focusIdeas: [],   // unscheduled future focus ideas
+  habitLogs: {},    // { 'YYYY-MM-DD': ['habitId', ...] }
 };
 
 export const FOCUS_COLORS = ['#5a7a52', '#b85c40', '#6b7fa8', '#c4923a'];
@@ -25,17 +25,59 @@ function load() {
 
     // Migrate: old flat dayQueue → dayQueues[today]
     if (state.dayQueue?.length && !Object.keys(state.dayQueues || {}).length) {
-      const today = localDateStr();
-      state.dayQueues = { [today]: state.dayQueue };
+      state.dayQueues = { [localDateStr()]: state.dayQueue };
     }
     delete state.dayQueue;
-    if (!state.dayQueues) state.dayQueues = {};
+
+    // Migrate: dayQueues → task.scheduledDate + dayOrders
+    if (state.dayQueues) {
+      const taskDates = {};
+      for (const [date, ids] of Object.entries(state.dayQueues)) {
+        for (const id of (ids || [])) {
+          if (!taskDates[id] || date > taskDates[id]) taskDates[id] = date;
+        }
+      }
+      state.tasks = (state.tasks || []).map(t =>
+        taskDates[t.id] ? { ...t, scheduledDate: taskDates[t.id] } : t
+      );
+      if (!state.dayOrders) {
+        const orders = {};
+        for (const [date, ids] of Object.entries(state.dayQueues)) {
+          const valid = (ids || []).filter(id => state.tasks.find(t => t.id === id)?.scheduledDate === date);
+          if (valid.length) orders[date] = valid;
+        }
+        state.dayOrders = orders;
+      }
+      delete state.dayQueues;
+    }
+    if (!state.dayOrders) state.dayOrders = {};
 
     // Migrate: non-recurring blocks without a date get today's date
     const today = localDateStr();
     state.blocks = (state.blocks || []).map(b =>
       b.recurrence?.length === 0 && !b.date ? { ...b, date: today } : b
     );
+
+    // Rollover: move incomplete tasks with a past scheduledDate to today
+    const todayStr = localDateStr();
+    const rollIds = new Set(
+      (state.tasks || [])
+        .filter(t => t.scheduledDate && t.scheduledDate < todayStr && !t.done)
+        .map(t => t.id)
+    );
+    if (rollIds.size > 0) {
+      state.tasks = state.tasks.map(t =>
+        rollIds.has(t.id) ? { ...t, scheduledDate: todayStr } : t
+      );
+      const orders = { ...state.dayOrders };
+      for (const [date, ids] of Object.entries(orders)) {
+        if (date < todayStr) orders[date] = ids.filter(id => !rollIds.has(id));
+      }
+      const todayOrder = orders[todayStr] || [];
+      const todaySet = new Set(todayOrder);
+      orders[todayStr] = [...todayOrder, ...[...rollIds].filter(id => !todaySet.has(id))];
+      state.dayOrders = orders;
+    }
 
     return state;
   } catch {
@@ -64,17 +106,26 @@ export function useStore() {
   }
 
   function updateTask(id, patch) {
-    updateState(s => ({ ...s, tasks: s.tasks.map(t => t.id === id ? { ...t, ...patch } : t) }));
+    updateState(s => ({
+      ...s,
+      tasks: s.tasks.map(t => {
+        if (t.id !== id) return t;
+        const updated = { ...t, ...patch };
+        if (patch.done === true && !t.done) updated.completedAt = Date.now();
+        if (patch.done === false) delete updated.completedAt;
+        return updated;
+      }),
+    }));
   }
 
   function deleteTask(id) {
     updateState(s => {
-      // Remove from every day's queue
-      const dayQueues = {};
-      for (const [date, q] of Object.entries(s.dayQueues)) {
-        dayQueues[date] = q.filter(qid => qid !== id);
+      const task = s.tasks.find(t => t.id === id);
+      const orders = { ...s.dayOrders };
+      if (task?.scheduledDate && orders[task.scheduledDate]) {
+        orders[task.scheduledDate] = orders[task.scheduledDate].filter(oid => oid !== id);
       }
-      return { ...s, tasks: s.tasks.filter(t => t.id !== id), dayQueues };
+      return { ...s, tasks: s.tasks.filter(t => t.id !== id), dayOrders: orders };
     });
   }
 
@@ -102,7 +153,7 @@ export function useStore() {
     updateState(s => {
       const item = s.inbox.find(i => i.id === id);
       if (!item) return s;
-      const task = { id: crypto.randomUUID(), title: item.title, quadrant, done: false, notes: '', createdAt: Date.now(), ...(item.focusId ? { focusId: item.focusId } : {}) };
+      const task = { id: item.id, title: item.title, quadrant, done: false, notes: '', createdAt: Date.now(), ...(item.focusId ? { focusId: item.focusId } : {}) };
       return { ...s, inbox: s.inbox.filter(i => i.id !== id), tasks: [...s.tasks, task] };
     });
   }
@@ -114,32 +165,50 @@ export function useStore() {
     });
   }
 
-  // ---- Day queues (per-date) ----
-  function getQueueForDate(dateStr) {
-    return state.dayQueues[dateStr] || [];
+  // ---- Day scheduling ----
+  function getTasksForDate(dateStr) {
+    const scheduled = state.tasks.filter(t => t.scheduledDate === dateStr);
+    const order = state.dayOrders[dateStr] || [];
+    const posMap = Object.fromEntries(order.map((id, i) => [id, i]));
+    return scheduled.sort((a, b) => (posMap[a.id] ?? Infinity) - (posMap[b.id] ?? Infinity));
   }
 
-  function addToDateQueue(taskId, dateStr) {
+  function scheduleTask(taskId, dateStr) {
     updateState(s => {
-      const q = s.dayQueues[dateStr] || [];
-      if (q.includes(taskId)) return s;
-      return { ...s, dayQueues: { ...s.dayQueues, [dateStr]: [...q, taskId] } };
+      const task = s.tasks.find(t => t.id === taskId);
+      if (!task) return s;
+      const oldDate = task.scheduledDate;
+      const tasks = s.tasks.map(t => t.id === taskId ? { ...t, scheduledDate: dateStr } : t);
+      const orders = { ...s.dayOrders };
+      if (oldDate && oldDate !== dateStr && orders[oldDate]) {
+        orders[oldDate] = orders[oldDate].filter(id => id !== taskId);
+      }
+      if (!(orders[dateStr] || []).includes(taskId)) {
+        orders[dateStr] = [...(orders[dateStr] || []), taskId];
+      }
+      return { ...s, tasks, dayOrders: orders };
     });
   }
 
-  function removeFromDateQueue(taskId, dateStr) {
+  function unscheduleTask(taskId) {
     updateState(s => {
-      const q = (s.dayQueues[dateStr] || []).filter(id => id !== taskId);
-      return { ...s, dayQueues: { ...s.dayQueues, [dateStr]: q } };
+      const task = s.tasks.find(t => t.id === taskId);
+      if (!task) return s;
+      const tasks = s.tasks.map(t => t.id === taskId ? { ...t, scheduledDate: undefined } : t);
+      const orders = { ...s.dayOrders };
+      if (task.scheduledDate && orders[task.scheduledDate]) {
+        orders[task.scheduledDate] = orders[task.scheduledDate].filter(id => id !== taskId);
+      }
+      return { ...s, tasks, dayOrders: orders };
     });
   }
 
-  function reorderDateQueue(dateStr, orderedIds) {
-    updateState(s => ({ ...s, dayQueues: { ...s.dayQueues, [dateStr]: orderedIds } }));
+  function reorderDayOrder(dateStr, orderedIds) {
+    updateState(s => ({ ...s, dayOrders: { ...s.dayOrders, [dateStr]: orderedIds } }));
   }
 
-  // Shortcut: add to today (used by matrix "→ Today" button)
-  function addToQueue(taskId) { addToDateQueue(taskId, localDateStr()); }
+  // Shortcut: schedule for today (used by matrix "→ Today" button)
+  function addToQueue(taskId) { scheduleTask(taskId, localDateStr()); }
 
   // ---- Time blocks ----
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -219,8 +288,14 @@ export function useStore() {
   }
 
   function addSetupTaskToFocus(focusId, title) {
-    const task = { id: crypto.randomUUID(), title };
-    updateState(s => ({ ...s, focuses: (s.focuses || []).map(f => f.id === focusId ? { ...f, setupTasks: [...f.setupTasks, task] } : f) }));
+    const id = crypto.randomUUID();
+    const setupTask = { id, title };
+    const inboxItem = { id, title, createdAt: Date.now(), focusId };
+    updateState(s => ({
+      ...s,
+      focuses: (s.focuses || []).map(f => f.id === focusId ? { ...f, setupTasks: [...f.setupTasks, setupTask] } : f),
+      inbox: [...s.inbox, inboxItem],
+    }));
   }
 
   function removeSetupTaskFromFocus(focusId, taskId) {
@@ -274,13 +349,12 @@ export function useStore() {
     tasks: state.tasks,
     inbox: state.inbox,
     blocks: state.blocks,
-    dayQueues: state.dayQueues,
     focuses: state.focuses || [],
     focusIdeas: state.focusIdeas || [],
     habitLogs: state.habitLogs || {},
     addTask, updateTask, deleteTask, moveTask, reorderTasks,
     addToInbox, deleteFromInbox, moveFromInboxToQuadrant, reorderInbox,
-    getQueueForDate, addToDateQueue, removeFromDateQueue, reorderDateQueue, addToQueue,
+    getTasksForDate, scheduleTask, unscheduleTask, reorderDayOrder, addToQueue,
     addBlock, updateBlock, deleteBlock, blocksForDate,
     addFocus, updateFocus, deleteFocus,
     addFocusIdea, updateFocusIdea, deleteFocusIdea, promoteFocusIdea,

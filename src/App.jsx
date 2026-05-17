@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore, localDateStr } from './store';
+import { useStore } from './store';
 import { Matrix } from './components/Matrix';
 import { DailyPlanner } from './components/DailyPlanner';
 import { Focuses } from './components/Focuses';
@@ -13,9 +13,6 @@ export default function App() {
     localStorage.setItem('day-planner-view', v);
   }
   const store = useStore();
-
-  // Matrix needs today's queue to show the "✓ Today" badge
-  const todayQueue = store.getQueueForDate(localDateStr());
 
   return (
     <div className="app">
@@ -51,7 +48,7 @@ export default function App() {
             onDelete={store.deleteTask}
             onAddTask={store.addTask}
             onAddToQueue={store.addToQueue}
-            dayQueue={todayQueue}
+            onUnschedule={store.unscheduleTask}
             focuses={store.focuses}
             reorderTasks={store.reorderTasks}
             moveTask={store.moveTask}
@@ -70,9 +67,9 @@ export default function App() {
             addHabitToFocus={store.addHabitToFocus}
             removeHabitFromFocus={store.removeHabitFromFocus}
             updateHabitDays={store.updateHabitDays}
+            tasks={store.tasks}
             addSetupTaskToFocus={store.addSetupTaskToFocus}
             removeSetupTaskFromFocus={store.removeSetupTaskFromFocus}
-            addToInbox={store.addToInbox}
             focusIdeas={store.focusIdeas}
             addFocusIdea={store.addFocusIdea}
             updateFocusIdea={store.updateFocusIdea}
@@ -86,10 +83,10 @@ export default function App() {
             updateBlock={store.updateBlock}
             deleteBlock={store.deleteBlock}
             tasks={store.tasks}
-            getQueueForDate={store.getQueueForDate}
-            addToDateQueue={store.addToDateQueue}
-            removeFromDateQueue={store.removeFromDateQueue}
-            reorderDateQueue={store.reorderDateQueue}
+            getTasksForDate={store.getTasksForDate}
+            scheduleTask={store.scheduleTask}
+            unscheduleTask={store.unscheduleTask}
+            reorderDayOrder={store.reorderDayOrder}
             onUpdateTask={store.updateTask}
             focuses={store.focuses}
             habitLogs={store.habitLogs}

@@ -163,6 +163,7 @@ kbd {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  align-items: start;
 }
 
 .quadrant {
@@ -174,6 +175,7 @@ kbd {
   min-height: 200px;
   transition: box-shadow 0.15s;
 }
+.quadrant-collapsed { min-height: 0; }
 .quadrant-over { box-shadow: 0 0 0 2px var(--q-color); }
 
 /* highlight the important-not-urgent quadrant */
@@ -183,12 +185,32 @@ kbd {
 
 .quadrant-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 10px;
 }
+.quadrant-collapsed .quadrant-header { margin-bottom: 0; }
 .quadrant-label { font-weight: 600; font-size: 13px; color: var(--text-heading); }
-.quadrant-sub { font-size: 11px; color: var(--q-color); font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; }
+.quadrant-sub { font-size: 11px; color: var(--q-color); font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; flex: 1; }
+.quadrant-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--border);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.quadrant-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.quadrant-toggle:hover { background: var(--border); color: var(--text); }
 
 .quadrant-tasks { display: flex; flex-direction: column; gap: 6px; }
 
@@ -236,7 +258,17 @@ kbd {
   outline: none;
 }
 
-.task-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
+.task-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+
+.task-scheduled-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
 
 .task-focus-badge {
   font-size: 10px;
@@ -489,12 +521,17 @@ kbd {
 }
 
 .pull-panel-header {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  padding-bottom: 6px;
+  z-index: 1;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 
 .pull-group {
@@ -562,7 +599,6 @@ kbd {
 
 /* ---- Inbox Panel ---- */
 .inbox-panel {
-  margin-top: 12px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -613,6 +649,40 @@ kbd {
   font-size: 10px;
   padding: 0 3px;
 }
+
+.inbox-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.inbox-add-quadrant-btn {
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1.5px solid var(--q-color, var(--accent));
+  background: transparent;
+  color: var(--q-color, var(--accent));
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+.inbox-add-quadrant-btn:hover,
+.inbox-add-quadrant-btn.active {
+  background: color-mix(in srgb, var(--q-color, var(--accent)) 12%, transparent);
+}
+
+.inbox-quick-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.inbox-quick-add-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 
 .inbox-toggle {
   background: none;
@@ -741,6 +811,7 @@ kbd {
 /* ---- Calendar grid ---- */
 .planner-columns-grid {
   grid-template-columns: 3fr 2fr;
+  align-items: stretch;
 }
 
 .day-grid-wrap {
@@ -1024,7 +1095,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  height: calc(100vh - 170px); /* viewport minus header + planner nav */
+  height: 100%;
 }
 
 .habit-tracker {
@@ -1033,6 +1104,7 @@ kbd {
   border-radius: var(--radius);
   overflow: hidden;
   flex-shrink: 0;
+  margin-top: auto;
 }
 
 .habit-tracker-header {
@@ -1323,6 +1395,14 @@ kbd {
   align-items: center;
   gap: 6px;
   padding: 3px 0;
+}
+.focus-list-item-done .focus-list-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.focus-list-dot-done {
+  background: var(--focus-color);
+  opacity: 1;
 }
 
 .focus-list-dot {
